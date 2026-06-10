@@ -15,67 +15,100 @@ from langchain_core.messages import HumanMessage
 from my_models import GEMINI_FLASH
 from my_keys import GEMINI_API_KEY, COHERE_API_KEY
 from my_helper import encode_image
-from langchain_core.prompts import ChatPromptTemplate # Actualizado #
+from langchain_core.prompts import ChatPromptTemplate, PromptTemplate # Actualizado #
+from langchain_core.output_parsers import StrOutputParser # NUEVO: Falto importar el parser#
+from langchain_core.runnables import RunnablePassthrough  # NUEVO: Para encadenar datos #
+# from langchain.globals import set_debug    == bug ==
+from langchain_core.globals import set_debug
 
+set_debug(True)
 
 # ---------------------------------------------------------------------
-# 1. EJECUCIÓN CON GEMINI (Texto)
+# 1. CONFIGURACIÓN DE MODELOS
 # ---------------------------------------------------------------------
 llm_gemini = ChatGoogleGenerativeAI(
-    api_key= GEMINI_API_KEY,
-    model= GEMINI_FLASH,      
+     api_key=GEMINI_API_KEY,
+     model=GEMINI_FLASH,      
 ) 
 
-consulta = "Cuales canales colombianos de youtube me recomiendas para saber mas sobre telefonos inteligentes"
-respuesta_gemini = llm_gemini.invoke(consulta) 
-print("Gemini: ", respuesta_gemini.content)
-print("-" * 50)
-
-# ---------------------------------------------------------------------
-# 2. EJECUCIÓN CON COHERE (Texto)
-# ---------------------------------------------------------------------
 llm_cohere = ChatCohere(
     cohere_api_key=COHERE_API_KEY
 )
 
-respuesta_cohere = llm_cohere.invoke([HumanMessage(content=consulta)])
-print("Cohere: ", respuesta_cohere.content)
+# ---------------------------------------------------------------------
+# 2. ANÁLISIS MULTIMODAL MANUAL (Gemini)
+# ---------------------------------------------------------------------
+imagen_base64 = encode_image('datos/ejemplo_grafico.jpg')
+pregunta_usuario = "Describa la imagen de forma detallada." 
+
+template_analisis = ChatPromptTemplate.from_messages(
+     [
+          (
+               "system",
+               "Asume que eres analista de imagenes. Tu principal tarea consiste en: analizar una imagen para extraer las informaciones mas relevantes de manera objetiva."
+          ),
+          (
+               "human",
+               [
+                    {"type": "text", "text": "{pregunta}"},
+                    {
+                         "type": "image_url",
+                         "image_url": {"url": "data:image/jpeg;base64,{imagen_b64}"}
+                    }
+               ]
+          )
+     ]
+)
+
+# Formateamos manualmente para la primera prueba de Gemini
+prompt_formateado = template_analisis.format_messages(
+     pregunta=pregunta_usuario, 
+     imagen_b64=imagen_base64
+)
+
+print("Analizando imagen con Gemini de forma manual...")
+respuesta_imagen = llm_gemini.invoke(prompt_formateado)
+print("\nResultado del análisis manual:\n", respuesta_imagen.content)
 print("-" * 50)
 
 # ---------------------------------------------------------------------
-# 3. ANÁLISIS MULTIMODAL CON PROMPT TEMPLATE (Gemini)
+# 3. CADENA DE ANÁLISIS MULTIMODAL (LCEL)
 # ---------------------------------------------------------------------
-# Codificamos la imagen local
-imagen_base64 = encode_image('datos/ejemplo_grafico.jpg')
-pregunta_usuario = "Describa la imagen de forma detallada."
+cadena_analisis = template_analisis | llm_gemini | StrOutputParser()
 
-# Definimos la plantilla respetando el formato multimodal de LangChain
-template_analisis = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            "Asume que eres analista de imagenes. Tu principal tarea consiste en: analizar una imagen para extraer las informaciones mas relevantes de manera objetiva."
-        ),
-        (
-            "human",
-            [
-                {"type": "text", "text": "{pregunta}"},
-                {
-                    "type": "image_url",
-                    "image_url": {"url": "data:image/jpeg;base64,{imagen_b64}"}
-                }
-            ]
-        )
-    ]
+# ---------------------------------------------------------------------
+# 4. CADENA DE RESUMEN LOCALIZADO (Cohere)
+# ---------------------------------------------------------------------
+template_respuesta = PromptTemplate(
+    template="""
+    Genera un resumen, utilizando un lenguaje claro y objetivo, enfocado en el publico colombiano.
+    La idea es que la comunicacion del resultado sea lo mas sencilla posible, priorizando los registros para consultas posteriores.  
+    
+    # RESULTADO DE LA IMAGEN
+    {respuesta_analisis_imagen}
+    """,
+    input_variables=["respuesta_analisis_imagen"]
 )
 
-# Formateamos la plantilla pasando las variables correspondientes
-prompt_formateado = template_analisis.format_messages(
-    pregunta=pregunta_usuario,
-    imagen_b64=imagen_base64
+cadena_resumen = template_respuesta | llm_cohere | StrOutputParser()
+
+# ---------------------------------------------------------------------
+# 5. ORQUESTACIÓN: CADENA COMPUESTA GLOBAL
+# ---------------------------------------------------------------------
+# Mapeamos la salida de la primera cadena para que encaje en la entrada de la segunda
+cadena_compuesta = (
+    cadena_analisis 
+    | {"respuesta_analisis_imagen": RunnablePassthrough()} 
+    | cadena_resumen
 )
 
-# Invocamos a Gemini pasando el prompt final estructurado
-print("Analizando imagen con Gemini...")
-respuesta_imagen = llm_gemini.invoke(prompt_formateado)
-print("\nResultado del análisis:\n", respuesta_imagen.content)
+print("Iniciando pipeline compuesto (Gemini + Cohere)...")
+
+# Ejecución final pasando las llaves exactas que exige tu template_analisis
+resultado_final = cadena_compuesta.invoke({
+    "pregunta": "Identifica los datos clave del gráfico.",
+    "imagen_b64": imagen_base64
+})
+
+print("\n--- RESUMEN FINAL ADAPTADO (Cohere) ---")
+print(resultado_final)
