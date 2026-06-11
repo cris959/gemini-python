@@ -14,7 +14,9 @@ def main():
     orquestador = AgenteOrquestador()
     
     # 2. Definimos la consulta apuntando explícitamente a la carpeta y extensión correctas
-    pregunta = "Por favor, realiza el análisis de la imagen ubicada en 'datos/ejemplo_grafico.jpg' y muéstrame el resultado estructurado."
+    # pregunta = "Por favor, realiza el análisis de la imagen ubicada en 'datos/ejemplo_grafico.jpg' y muéstrame el resultado estructurado."
+    
+    pregunta = "Explícame de forma didáctica qué es la programación orientada a objetos"
     
     print("🚀 Iniciando el Agente Orquestador ReAct...")
     print(f"Pregunta: {pregunta}\n" + "-"*50)
